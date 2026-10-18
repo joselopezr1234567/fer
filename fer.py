@@ -32,6 +32,7 @@ class ExcelFilterApp:
         self.df = None
         self.filtered_results = []
         self.is_running = False
+        self.report_data = []
 
         self.create_widgets()
 
@@ -70,6 +71,11 @@ class ExcelFilterApp:
 
         self.text_output = tk.Text(bottom_frame, wrap="none", font=("Courier New", 10))
         
+        # Configurar etiquetas de colores para la interfaz
+        self.text_output.tag_config("rojo", background="#ffcccc", foreground="black")      # No se oculta (hay reservas futuras)
+        self.text_output.tag_config("amarillo", background="#ffffe6", foreground="black")   # Se oculta o no encontrado
+        self.text_output.tag_config("normal", background="white", foreground="black")
+
         scrollbar_y = ttk.Scrollbar(bottom_frame, orient="vertical", command=self.text_output.yview)
         scrollbar_x = ttk.Scrollbar(bottom_frame, orient="horizontal", command=self.text_output.xview)
         
@@ -226,6 +232,7 @@ class ExcelFilterApp:
         if not respuesta:
             return
 
+        self.report_data = []
         self.btn_auto.config(state="disabled")
         self.btn_stop.config(state="normal")
         self.btn_process.config(state="disabled")
@@ -236,6 +243,12 @@ class ExcelFilterApp:
 
     def stop_automation(self):
         self.is_running = False
+
+    def _append_output_log(self, text, tag="normal"):
+        def _update():
+            self.text_output.insert(tk.END, text + "\n", tag)
+            self.text_output.see(tk.END)
+        self.root.after(0, _update)
 
     def _leer_texto_region(self, box, whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.'):
         left, top, width, height = box
@@ -349,6 +362,15 @@ class ExcelFilterApp:
                 if not match_encontrado and self.is_running:
                     pyautogui.click(1295, 216)
                     time.sleep(0.4)
+                    # No encontrado / Ya ocultado anteriormente -> Registrar y marcar en amarillo
+                    msg = f"[AMARILLO] Código no encontrado con ubicación (Ya ocultado/omitido): {supp} | {opt_srv} | {target_location}"
+                    self._append_output_log(msg, "amarillo")
+                    self.report_data.append({
+                        'Proveedor': supp,
+                        'Codigo': opt_srv,
+                        'Ubicacion': target_location,
+                        'Estado': 'No encontrado / Ya ocultado'
+                    })
                     continue
 
                 if not self.is_running: break
@@ -369,6 +391,13 @@ class ExcelFilterApp:
                     time.sleep(0.3)
                     pyautogui.click(1520, 226)
                     time.sleep(0.8)
+
+                    self.report_data.append({
+                        'Proveedor': supp,
+                        'Codigo': opt_srv,
+                        'Ubicacion': target_location,
+                        'Estado': 'Procesado Mitta/Sixt'
+                    })
                 
                 else:
                     # --- FLUJO UNIFICADO (SEGÚN DIAGRAMA DE FLUJO) ---
@@ -451,7 +480,16 @@ class ExcelFilterApp:
                     print("-" * 70)
 
                     if hay_posterior:
-                        # Si hay próximas (Sí) -> Seguir al siguiente código (3 clics)
+                        # Si hay próximas (True) -> Marcar en ROJO, empezar desde la coordenada 4 (Results X=479, Y=278) y ver el siguiente código
+                        msg = f"[ROJO] No se oculta (Tiene reservas próximas): {supp} | {opt_srv} | {target_location}"
+                        self._append_output_log(msg, "rojo")
+                        self.report_data.append({
+                            'Proveedor': supp,
+                            'Codigo': opt_srv,
+                            'Ubicacion': target_location,
+                            'Estado': 'No se oculta (Reservas futuras)'
+                        })
+
                         pyautogui.click(1295, 216)
                         time.sleep(0.4)
                         if not self.is_running: break
@@ -463,6 +501,7 @@ class ExcelFilterApp:
                         time.sleep(0.4)
                         if not self.is_running: break
 
+                        # Coordenada 4 (Results)
                         pyautogui.click(479, 278)
                         time.sleep(1.2)
                         if not self.is_running: break
@@ -489,11 +528,51 @@ class ExcelFilterApp:
                             pyautogui.click(1295, 216)
                             time.sleep(0.4)
                     else:
-                        # Si no hay próximas / No (se oculta) -> Doble clic cada 0.3s
+                        # Si no hay próximas / False (se oculta) -> Marcar en AMARILLO y secuencia de ocultamiento solicitada
+                        msg = f"[AMARILLO] Se oculta (Sin reservas futuras): {supp} | {opt_srv} | {target_location}"
+                        self._append_output_log(msg, "amarillo")
+                        self.report_data.append({
+                            'Proveedor': supp,
+                            'Codigo': opt_srv,
+                            'Ubicacion': target_location,
+                            'Estado': 'Ocultado'
+                        })
+
+                        # 1. Clic X=395, Y=226
+                        pyautogui.click(395, 226)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        # 2. Clic X=380, Y=279
+                        pyautogui.click(380, 279)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        # 3. Clic X=1269, Y=559
+                        pyautogui.click(1269, 559)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        # 4. Clic X=1563, Y=363
+                        pyautogui.click(1563, 363)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        # 5. Dos clics en X=1520, Y=226 separados por 0.3 segundos (Exit product y exit supplier)
                         pyautogui.click(1520, 226)
                         time.sleep(0.3)
                         pyautogui.click(1520, 226)
                         time.sleep(0.8)
+
+            # Generar archivo CSV al terminar
+            if self.report_data:
+                try:
+                    df_report = pd.DataFrame(self.report_data)
+                    csv_filename = "reporte_automatizacion.csv"
+                    df_report.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+                    print(f"\n[LOG] Reporte CSV guardado exitosamente en: {os.path.abspath(csv_filename)}")
+                except Exception as ex:
+                    print(f"\n[LOG] Error al guardar archivo CSV: {ex}")
 
             if self.is_running:
                 self.root.after(0, self._automation_success)
@@ -512,7 +591,7 @@ class ExcelFilterApp:
         self.btn_process.config(state="normal")
         self.btn_auto.config(state="normal")
         self.btn_stop.config(state="disabled")
-        messagebox.showinfo("Automatización Finalizada", "¡Se procesaron todos los registros correctamente!")
+        messagebox.showinfo("Automatización Finalizada", "¡Se procesaron todos los registros y se generó el archivo 'reporte_automatizacion.csv'!")
 
     def _automation_stopped(self):
         self.progress.stop()
