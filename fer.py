@@ -71,7 +71,6 @@ class ExcelFilterApp:
 
         self.text_output = tk.Text(bottom_frame, wrap="none", font=("Courier New", 10))
         
-        # Configurar etiquetas de colores para la interfaz
         self.text_output.tag_config("rojo", background="#ffcccc", foreground="black")      # No se oculta (hay reservas futuras)
         self.text_output.tag_config("amarillo", background="#ffffe6", foreground="black")   # Se oculta o no encontrado
         self.text_output.tag_config("normal", background="white", foreground="black")
@@ -301,7 +300,6 @@ class ExcelFilterApp:
                 ((338, 968, 100, 20), (388, 978.0))   # 20
             ]
 
-            # Generar las 9 regiones de fechas basadas en X=1171, Y=382 hasta Y=1009 separadas por 33 hacia abajo
             regiones_fechas = []
             y_inicial = 382
             x_inicial = 1171
@@ -362,7 +360,6 @@ class ExcelFilterApp:
                 if not match_encontrado and self.is_running:
                     pyautogui.click(1295, 216)
                     time.sleep(0.4)
-                    # No encontrado / Ya ocultado anteriormente -> Registrar y marcar en amarillo
                     msg = f"[AMARILLO] Código no encontrado con ubicación (Ya ocultado/omitido): {supp} | {opt_srv} | {target_location}"
                     self._append_output_log(msg, "amarillo")
                     self.report_data.append({
@@ -418,7 +415,7 @@ class ExcelFilterApp:
                     time.sleep(0.8)
                     if not self.is_running: break
 
-                    # 10. Revisar si hay reservas próximas (leer regiones de fechas) con LOGS y Soporte de Meses
+                    # 10. Revisar si hay reservas próximas (leer regiones de fechas)
                     hoy = datetime.now().date()
                     hay_posterior = False
 
@@ -436,10 +433,8 @@ class ExcelFilterApp:
                         fecha_txt = self._leer_texto_region(r_box)
                         
                         if not fecha_txt:
-                            print(f"[LOG] Región Fecha #{r_idx+1}: (Vacía / No se detectó texto)")
                             continue
 
-                        print(f"[LOG] Región Fecha #{r_idx+1}: OCR leyó -> '{fecha_txt}'")
                         parsed_ok = False
                         dt_parsed = None
 
@@ -466,21 +461,15 @@ class ExcelFilterApp:
 
                         if parsed_ok:
                             es_posterior = dt_parsed > hoy
-                            print(f"[LOG]   -> Parseado con éxito: {dt_parsed} | ¿Es posterior a hoy?: {es_posterior}")
                             if es_posterior:
                                 hay_posterior = True
                                 break
-                        else:
-                            print(f"[LOG]   -> ADVERTENCIA: El texto '{fecha_txt}' no se pudo convertir a formato de fecha.")
 
                         if hay_posterior:
                             break
 
-                    print(f"[LOG] Resultado final de fechas para este registro -> ¿Hay fecha posterior?: {hay_posterior}")
-                    print("-" * 70)
-
                     if hay_posterior:
-                        # Si hay próximas (True) -> Marcar en ROJO, empezar desde la coordenada 4 (Results X=479, Y=278) y ver el siguiente código
+                        # Si hay próximas (True) -> Marcar en ROJO, hacer 2 clics en X=1520, Y=226 separados por 0.3s (Exit product y exit supplier) y volver a buscar en la lupa
                         msg = f"[ROJO] No se oculta (Tiene reservas próximas): {supp} | {opt_srv} | {target_location}"
                         self._append_output_log(msg, "rojo")
                         self.report_data.append({
@@ -490,45 +479,12 @@ class ExcelFilterApp:
                             'Estado': 'No se oculta (Reservas futuras)'
                         })
 
-                        pyautogui.click(1295, 216)
-                        time.sleep(0.4)
-                        if not self.is_running: break
-
-                        pyautogui.click(786, 449)
-                        pyautogui.hotkey('ctrl', 'a')
-                        pyautogui.press('backspace')
-                        pyautogui.write(str(opt_srv), interval=0.03)
-                        time.sleep(0.4)
-                        if not self.is_running: break
-
-                        # Coordenada 4 (Results)
-                        pyautogui.click(479, 278)
-                        time.sleep(1.2)
-                        if not self.is_running: break
-
-                        match_nuevamente = False
-                        for idx, (box, center) in enumerate(regiones_y_centros):
-                            if not self.is_running: break
-                            texto_leido = self._leer_texto_region(box, whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-')
-                            texto_leido = texto_leido.replace('1', 'I').replace('0', 'O').replace('5', 'S').replace('8', 'B')
-
-                            if not texto_leido or texto_leido == "" or texto_leido == "OO":
-                                break
-
-                            target_clean = str(target_location).strip().upper()
-                            leido_clean = str(texto_leido).strip().upper()
-
-                            if target_clean in leido_clean or leido_clean in target_clean:
-                                pyautogui.click(center[0], center[1])
-                                time.sleep(0.4)
-                                match_nuevamente = True
-                                break
-
-                        if not match_nuevamente and self.is_running:
-                            pyautogui.click(1295, 216)
-                            time.sleep(0.4)
+                        pyautogui.click(1520, 226)
+                        time.sleep(0.3)
+                        pyautogui.click(1520, 226)
+                        time.sleep(0.8)
                     else:
-                        # Si no hay próximas / False (se oculta) -> Marcar en AMARILLO y secuencia de ocultamiento solicitada
+                        # Si no hay próximas / False (se oculta) -> Marcar en AMARILLO y secuencia de ocultamiento
                         msg = f"[AMARILLO] Se oculta (Sin reservas futuras): {supp} | {opt_srv} | {target_location}"
                         self._append_output_log(msg, "amarillo")
                         self.report_data.append({
@@ -538,33 +494,27 @@ class ExcelFilterApp:
                             'Estado': 'Ocultado'
                         })
 
-                        # 1. Clic X=395, Y=226
                         pyautogui.click(395, 226)
                         time.sleep(0.4)
                         if not self.is_running: break
 
-                        # 2. Clic X=380, Y=279
                         pyautogui.click(380, 279)
                         time.sleep(0.4)
                         if not self.is_running: break
 
-                        # 3. Clic X=1269, Y=559
                         pyautogui.click(1269, 559)
                         time.sleep(0.4)
                         if not self.is_running: break
 
-                        # 4. Clic X=1563, Y=363
                         pyautogui.click(1563, 363)
                         time.sleep(0.4)
                         if not self.is_running: break
 
-                        # 5. Dos clics en X=1520, Y=226 separados por 0.3 segundos (Exit product y exit supplier)
                         pyautogui.click(1520, 226)
                         time.sleep(0.3)
                         pyautogui.click(1520, 226)
                         time.sleep(0.8)
 
-            # Generar archivo CSV al terminar
             if self.report_data:
                 try:
                     df_report = pd.DataFrame(self.report_data)
