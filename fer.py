@@ -11,6 +11,8 @@ import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pandas as pd
+from datetime import datetime
+import re
 
 try:
     import pyautogui
@@ -148,7 +150,7 @@ class ExcelFilterApp:
         self.btn_auto.config(state="disabled")
         self.progress.start(10)
         self.text_output.delete("1.0", tk.END)
-        self.text_output.insert(tk.END, "Procesando y filtrando datos...\n")
+        self.text_output.insert(tk.END, "Procesando y cargando todos los datos...\n")
 
         threading.Thread(target=self._process_data_task, daemon=True).start()
 
@@ -170,18 +172,13 @@ class ExcelFilterApp:
                 self.root.after(0, lambda: self._process_error(error_detalle))
                 return
 
-            suppliers_to_filter = ["mitta", "sixt rent a car (ex europcar)"]
-            
-            df_clean = self.df.copy()
-            df_clean["SuppName_lower"] = df_clean[col_supp].astype(str).str.strip().str.lower()
+            df_clean = self.df.dropna(subset=[col_supp, col_opt, col_loc]).copy()
 
-            filtered_df = df_clean[df_clean["SuppName_lower"].isin(suppliers_to_filter)]
-
-            if filtered_df.empty:
-                result_text = "No se encontraron registros para 'MITTA' o 'Sixt Rent a Car (Ex Europcar)'.\n"
+            if df_clean.empty:
+                result_text = "No se encontraron registros válidos en el archivo.\n"
                 self.filtered_results = []
             else:
-                result_df = filtered_df[[col_supp, col_opt, col_loc]].drop_duplicates()
+                result_df = df_clean[[col_supp, col_opt, col_loc]].drop_duplicates()
                 
                 self.filtered_results = []
                 header_text = f"{'PROVEEDOR':<30} | {'CÓDIGO (OptSrv)':<20} | {'UBICACIÓN (location)':<20}\n"
@@ -195,7 +192,7 @@ class ExcelFilterApp:
                     self.filtered_results.append((supp, opt, loc))
                     lines.append(f"{supp:<30} | {opt:<20} | {loc:<20}\n")
                 
-                lines.append(f"\n[Proceso completado. Se encontraron {len(self.filtered_results):,} asociaciones únicas.]\n")
+                lines.append(f"\n[Proceso completado. Se cargaron {len(self.filtered_results):,} registros únicos.]\n")
                 result_text = "".join(lines)
 
             self.root.after(0, lambda: self._process_success(result_text))
@@ -219,12 +216,12 @@ class ExcelFilterApp:
 
     def run_automation_thread(self):
         if not self.filtered_results:
-            messagebox.showwarning("Aviso", "No hay registros filtrados para automatizar.")
+            messagebox.showwarning("Aviso", "No hay registros para automatizar.")
             return
 
         respuesta = messagebox.askyesno(
             "Confirmar Automatización", 
-            f"Se automatizarán {len(self.filtered_results)} registros con doble clic espaciado (0.3s).\n¿Deseas iniciar?"
+            f"Se automatizarán {len(self.filtered_results)} registros totales.\n¿Deseas iniciar?"
         )
         if not respuesta:
             return
@@ -240,7 +237,7 @@ class ExcelFilterApp:
     def stop_automation(self):
         self.is_running = False
 
-    def _leer_texto_region(self, box):
+    def _leer_texto_region(self, box, whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.'):
         left, top, width, height = box
         temp_img_path = "/tmp/region_check.png"
         try:
@@ -257,10 +254,8 @@ class ExcelFilterApp:
                 import pytesseract
                 from PIL import Image
                 img = Image.open(temp_img_path)
-                config_ocr = '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                config_ocr = f'--psm 7 -c tessedit_char_whitelist={whitelist}'
                 texto = pytesseract.image_to_string(img, config=config_ocr).strip()
-                
-                texto = texto.replace('1', 'I').replace('0', 'O').replace('5', 'S').replace('8', 'B')
                 return texto
         except Exception:
             pass
@@ -293,6 +288,16 @@ class ExcelFilterApp:
                 ((338, 968, 100, 20), (388, 978.0))   # 20
             ]
 
+            # Generar las 9 regiones de fechas basadas en X=1171, Y=382 hasta Y=1009 separadas por 33 hacia abajo
+            regiones_fechas = []
+            y_inicial = 382
+            x_inicial = 1171
+            w_fecha = 126
+            h_fecha = 33
+            for f_idx in range(9):
+                current_y = y_inicial + (f_idx * 33)
+                regiones_fechas.append((x_inicial, current_y, w_fecha, h_fecha))
+
             if self.is_running:
                 pyautogui.click(298, 1090)
                 time.sleep(0.5)
@@ -301,33 +306,33 @@ class ExcelFilterApp:
                 if not self.is_running:
                     break
 
-                # 1. Clic en lupa de producto (X=840, Y=304)
-                pyautogui.click(840, 304)
-                time.sleep(0.4)
+                supp_lower = str(supp).strip().lower()
+                es_mitta_sixt = supp_lower in ["mitta", "sixt rent a car (ex europcar)"]
 
+                # 1. Clic lupa producto (X=1060, Y=305)
+                pyautogui.click(1060, 305)
+                time.sleep(0.4)
                 if not self.is_running: break
 
-                # 2. Clic en campo de código (X=786, Y=449) y pegar OptSrv
+                # 3. Clic campo código (X=786, Y=449) y escribir código
                 pyautogui.click(786, 449)
                 pyautogui.hotkey('ctrl', 'a')
                 pyautogui.press('backspace')
                 pyautogui.write(str(opt_srv), interval=0.03)
                 time.sleep(0.4)
-
                 if not self.is_running: break
 
-                # 3. Clic en Results (X=479, Y=278)
+                # 4. Clic Results (X=479, Y=278)
                 pyautogui.click(479, 278)
                 time.sleep(1.2)
-
                 if not self.is_running: break
 
+                # 5 y 6. Leer regiones de localización y hacer clic si coincide
                 match_encontrado = False
-
                 for idx, (box, center) in enumerate(regiones_y_centros):
                     if not self.is_running: break
-
-                    texto_leido = self._leer_texto_region(box)
+                    texto_leido = self._leer_texto_region(box, whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-')
+                    texto_leido = texto_leido.replace('1', 'I').replace('0', 'O').replace('5', 'S').replace('8', 'B')
 
                     if not texto_leido or texto_leido == "" or texto_leido == "OO":
                         break
@@ -338,33 +343,157 @@ class ExcelFilterApp:
                     if target_clean in leido_clean or leido_clean in target_clean:
                         pyautogui.click(center[0], center[1])
                         time.sleep(0.4)
-
-                        if not self.is_running: break
-
-                        # 5. Clic en botón de acción (X=1162, Y=559)
-                        pyautogui.click(1162, 559)
-                        time.sleep(0.4)
-
-                        if not self.is_running: break
-
-                        # 6. Clic en Save (X=1554, Y=364)
-                        pyautogui.click(1554, 364)
-                        time.sleep(0.4)
-
-                        if not self.is_running: break
-
-                        # 7. Dos clics en (X=1520, Y=226) separados por 0.3 segundos
-                        pyautogui.click(1520, 226)
-                        time.sleep(0.3)
-                        pyautogui.click(1520, 226)
-                        time.sleep(0.8)
-
                         match_encontrado = True
                         break
 
                 if not match_encontrado and self.is_running:
                     pyautogui.click(1295, 216)
                     time.sleep(0.4)
+                    continue
+
+                if not self.is_running: break
+
+                if es_mitta_sixt:
+                    # --- FLUJO ESPECÍFICO MITTA Y SIXT ---
+                    pyautogui.click(1162, 559)
+                    time.sleep(0.4)
+
+                    if not self.is_running: break
+
+                    pyautogui.click(1554, 364)
+                    time.sleep(0.4)
+
+                    if not self.is_running: break
+
+                    pyautogui.click(1520, 226)
+                    time.sleep(0.3)
+                    pyautogui.click(1520, 226)
+                    time.sleep(0.8)
+                
+                else:
+                    # --- FLUJO UNIFICADO (SEGÚN DIAGRAMA DE FLUJO) ---
+                    # 7. Clic X=334, Y=649
+                    pyautogui.click(334, 649)
+                    time.sleep(0.4)
+                    if not self.is_running: break
+
+                    # 8. Clic X=356, Y=544
+                    pyautogui.click(356, 544)
+                    time.sleep(0.4)
+                    if not self.is_running: break
+
+                    # 9. ¿Está oculto? (Doble clic en X=1222, Y=365)
+                    pyautogui.click(1222, 365)
+                    time.sleep(0.3)
+                    pyautogui.click(1222, 365)
+                    time.sleep(0.8)
+                    if not self.is_running: break
+
+                    # 10. Revisar si hay reservas próximas (leer regiones de fechas) con LOGS y Soporte de Meses
+                    hoy = datetime.now().date()
+                    hay_posterior = False
+
+                    print(f"\n--- [LOG] Analizando fechas para Proveedor: {supp} | Código: {opt_srv} ---")
+                    print(f"[LOG] Fecha de referencia (Hoy): {hoy}")
+
+                    meses_map = {
+                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+                        'ene': 1, 'abr': 4, 'ago': 8, 'dic': 12
+                    }
+
+                    for r_idx, r_box in enumerate(regiones_fechas):
+                        if not self.is_running: break
+                        fecha_txt = self._leer_texto_region(r_box)
+                        
+                        if not fecha_txt:
+                            print(f"[LOG] Región Fecha #{r_idx+1}: (Vacía / No se detectó texto)")
+                            continue
+
+                        print(f"[LOG] Región Fecha #{r_idx+1}: OCR leyó -> '{fecha_txt}'")
+                        parsed_ok = False
+                        dt_parsed = None
+
+                        match_date = re.search(r'(\d{1,2})[-/]?([A-Za-z]{3})[-/]?(\d{4})', fecha_txt)
+                        if match_date:
+                            d, m_str, y = match_date.groups()
+                            m_lower = m_str.lower()
+                            if m_lower in meses_map:
+                                try:
+                                    dt_parsed = datetime(int(y), meses_map[m_lower], int(d)).date()
+                                    parsed_ok = True
+                                except ValueError:
+                                    pass
+
+                        if not parsed_ok:
+                            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
+                                try:
+                                    clean_num = fecha_txt.strip().split()[-1]
+                                    dt_parsed = datetime.strptime(clean_num, fmt).date()
+                                    parsed_ok = True
+                                    break
+                                except ValueError:
+                                    continue
+
+                        if parsed_ok:
+                            es_posterior = dt_parsed > hoy
+                            print(f"[LOG]   -> Parseado con éxito: {dt_parsed} | ¿Es posterior a hoy?: {es_posterior}")
+                            if es_posterior:
+                                hay_posterior = True
+                                break
+                        else:
+                            print(f"[LOG]   -> ADVERTENCIA: El texto '{fecha_txt}' no se pudo convertir a formato de fecha.")
+
+                        if hay_posterior:
+                            break
+
+                    print(f"[LOG] Resultado final de fechas para este registro -> ¿Hay fecha posterior?: {hay_posterior}")
+                    print("-" * 70)
+
+                    if hay_posterior:
+                        # Si hay próximas (Sí) -> Seguir al siguiente código (3 clics)
+                        pyautogui.click(1295, 216)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        pyautogui.click(786, 449)
+                        pyautogui.hotkey('ctrl', 'a')
+                        pyautogui.press('backspace')
+                        pyautogui.write(str(opt_srv), interval=0.03)
+                        time.sleep(0.4)
+                        if not self.is_running: break
+
+                        pyautogui.click(479, 278)
+                        time.sleep(1.2)
+                        if not self.is_running: break
+
+                        match_nuevamente = False
+                        for idx, (box, center) in enumerate(regiones_y_centros):
+                            if not self.is_running: break
+                            texto_leido = self._leer_texto_region(box, whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-')
+                            texto_leido = texto_leido.replace('1', 'I').replace('0', 'O').replace('5', 'S').replace('8', 'B')
+
+                            if not texto_leido or texto_leido == "" or texto_leido == "OO":
+                                break
+
+                            target_clean = str(target_location).strip().upper()
+                            leido_clean = str(texto_leido).strip().upper()
+
+                            if target_clean in leido_clean or leido_clean in target_clean:
+                                pyautogui.click(center[0], center[1])
+                                time.sleep(0.4)
+                                match_nuevamente = True
+                                break
+
+                        if not match_nuevamente and self.is_running:
+                            pyautogui.click(1295, 216)
+                            time.sleep(0.4)
+                    else:
+                        # Si no hay próximas / No (se oculta) -> Doble clic cada 0.3s
+                        pyautogui.click(1520, 226)
+                        time.sleep(0.3)
+                        pyautogui.click(1520, 226)
+                        time.sleep(0.8)
 
             if self.is_running:
                 self.root.after(0, self._automation_success)
